@@ -6,11 +6,11 @@
  * Font embedding: at export time the selected Google Fonts (title, clues,
  * grid) are fetched as TTF binaries, base64-encoded, and registered with
  * jsPDF via addFileToVFS/addFont. This means the downloaded PDF matches
- * the on-screen preview exactly. When the user opens the PDF in a text
- * editor or PDF viewer the font is fully embedded as a real TrueType font.
+ * the on-screen preview exactly.
  *
- * German Umlaut support: Ä, Ö, Ü are preserved in the grid and clues.
- * ß is always rendered as SS (handled upstream in generator.js).
+ * Fallback: if the page is opened as file:// or the CDN is unreachable,
+ * font embedding is skipped gracefully and Helvetica is used — the PDF
+ * still generates without any error.
  */
 
 function umlautSafe(str) {
@@ -22,8 +22,7 @@ function umlautSafe(str) {
 // API returns in modern browsers) is Brotli-compressed and cannot be parsed by
 // jsPDF. These URLs point to the uncompressed TTF source files in the official
 // Google/fonts GitHub repository served via jsDelivr (full CORS support).
-// Each entry: [ primaryUrl, alternativeUrl ] — the alt covers cases where
-// Google Fonts moved a font from a static TTF to a variable font subfolder.
+// Each entry: [ primaryUrl, alternativeUrl ]
 const FONT_TTF_URLS = {
     'Roboto':           ['https://cdn.jsdelivr.net/gh/google/fonts@main/apache/roboto/static/Roboto-Regular.ttf',
                          'https://cdn.jsdelivr.net/gh/google/fonts@main/apache/roboto/Roboto-Regular.ttf'],
@@ -76,34 +75,26 @@ const FONT_TTF_URLS = {
 };
 
 // ── Per-session font data cache ───────────────────────────────────────────────
-// Stores { base64, vfsName } for each successfully fetched Google Font so the
-// binary is only downloaded once per browser session. Each new jsPDF instance
-// still needs addFileToVFS/addFont called on it, which registerFontInPdf does.
 const _fontDataCache = {}; // fontName → { base64, vfsName } | 'failed'
 
 /**
- * Phase 1 – Download a TTF font binary and store it in _fontDataCache.
- * Safe to call multiple times; returns immediately on cache hit.
- *
- * Priority:
- *  1. FONT_TTF_URLS map  → direct TTF from Google Fonts GitHub via jsDelivr.
- *     jsPDF 2.5.1 requires TTF; woff2 is Brotli-compressed and cannot be
- *     decoded by jsPDF, so we must use real TTF files.
- *  2. Alternative URL    → covers fonts that moved to a variable-font subfolder.
- *  3. Helvetica fallback (handled by registerFontInPdf caller).
- *
- * Returns true on success, false on failure.
+ * Fetch a TTF font binary and cache it.
+ * Returns true on success, false if download failed or was skipped.
+ * NEVER throws — all errors are caught internally.
  */
 async function fetchGoogleFontBase64(fontName) {
     if (!fontName) return false;
     if (_fontDataCache[fontName] === 'failed') return false;
-    if (_fontDataCache[fontName]) return true; // already downloaded
+    if (_fontDataCache[fontName]) return true;
 
-    // Build ordered candidate list: known-good TTF URLs first
-    const knownUrls = FONT_TTF_URLS[fontName] || [];
-    const candidates = [...knownUrls];
+    const urls = FONT_TTF_URLS[fontName] || [];
+    if (urls.length === 0) {
+        console.warn(`[pdf-export] No known TTF URL for "${fontName}" – skipping`);
+        _fontDataCache[fontName] = 'failed';
+        return false;
+    }
 
-    for (const url of candidates) {
+    for (const url of urls) {
         try {
             const resp = await fetch(url);
             if (!resp.ok) {
@@ -111,9 +102,12 @@ async function fetchGoogleFontBase64(fontName) {
                 continue;
             }
             const buffer = await resp.arrayBuffer();
-            if (!buffer || buffer.byteLength < 200) continue; // sanity: real TTF > 200 bytes
+            if (!buffer || buffer.byteLength < 200) {
+                console.warn(`[pdf-export] Too small for "${fontName}" at ${url}`);
+                continue;
+            }
 
-            // Base64-encode in safe chunks to avoid call-stack overflow
+            // Base64-encode in chunks to avoid call-stack overflow
             const uint8 = new Uint8Array(buffer);
             let binary = '';
             const CHUNK = 8192;
@@ -127,48 +121,59 @@ async function fetchGoogleFontBase64(fontName) {
             return true;
 
         } catch (err) {
-            console.warn(`[pdf-export] Fetch failed for "${fontName}" (${url}):`, err.message);
+            // fetch() throws on network errors (e.g. file:// protocol blocked)
+            console.warn(`[pdf-export] Fetch error for "${fontName}" (${url}): ${err.message}`);
         }
     }
 
-    console.warn(`[pdf-export] Could not embed "${fontName}" – PDF will use Helvetica for this element`);
+    console.warn(`[pdf-export] Could not embed "${fontName}" – falling back to Helvetica`);
     _fontDataCache[fontName] = 'failed';
     return false;
 }
 
 /**
- * Phase 2 – Register a previously downloaded font into a specific jsPDF
- * instance. Must be called for every new pdf object, even if the font was
- * already fetched, because jsPDF's VFS is per-instance.
- * Returns the font name to pass to pdf.setFont(), or 'Helvetica' on failure.
+ * Register a cached font into a jsPDF instance.
+ * Returns the font name to use with setFont(), or 'helvetica' on failure.
+ * Uses lowercase 'helvetica' which is always available in jsPDF.
  */
 function registerFontInPdf(pdf, fontName) {
-    if (!fontName) return 'Helvetica';
+    if (!fontName) return 'helvetica';
     const entry = _fontDataCache[fontName];
-    if (!entry || entry === 'failed') return 'Helvetica';
+    if (!entry || entry === 'failed') return 'helvetica';
 
     try {
         pdf.addFileToVFS(entry.vfsName, entry.base64);
         pdf.addFont(entry.vfsName, fontName, 'normal');
-        pdf.addFont(entry.vfsName, fontName, 'bold'); // same file for bold
+        pdf.addFont(entry.vfsName, fontName, 'bold'); // same file – bold style alias
         return fontName;
     } catch (err) {
-        console.warn(`[pdf-export] Could not register "${fontName}" in pdf:`, err.message);
-        return 'Helvetica';
+        console.warn(`[pdf-export] Could not register "${fontName}" in pdf: ${err.message}`);
+        return 'helvetica';
     }
 }
 
 /**
- * Safe wrapper around pdf.setFont() – falls back to Helvetica if the
- * requested font name isn't registered (avoids jsPDF throwing).
+ * Safe pdf.setFont() wrapper.
+ * Falls back to 'helvetica'/'normal' if the requested font/style isn't available.
  */
 function safeSetFont(pdf, fontName, style) {
     style = style || 'normal';
+    // First try the requested font + style
     try {
         pdf.setFont(fontName, style);
-    } catch (_) {
-        pdf.setFont('Helvetica', style);
+        return;
+    } catch (_) { /* fall through */ }
+    // Try the same font with 'normal' (in case bold wasn't registered)
+    if (style !== 'normal') {
+        try {
+            pdf.setFont(fontName, 'normal');
+            return;
+        } catch (_) { /* fall through */ }
     }
+    // Final fallback: helvetica normal (always available)
+    try {
+        pdf.setFont('helvetica', 'normal');
+    } catch (_) { /* nothing more to do */ }
 }
 
 // ── Main export entry point ───────────────────────────────────────────────────
@@ -181,7 +186,7 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
     if      (trimSizeStr === '8.5x11')  { W = 8.5;  H = 11;   }
     else if (trimSizeStr === '6x9')     { W = 6;    H = 9;    }
     else if (trimSizeStr === '8.5x8.5') { W = 8.5;  H = 8.5;  }
-    else if (trimSizeStr === 'A4')      { W = 8.27; H = 11.69;}
+    else if (trimSizeStr === 'A4')      { W = 8.27; H = 11.69; }
     else                                { W = 8.5;  H = 11;   }
 
     const pdf = new jsPDF({
@@ -190,12 +195,11 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
         format: [W, H]
     });
 
-    const MARGIN = 0.5;
-    const usableW = W - 2 * MARGIN;
-    const usableH = H - 2 * MARGIN;
+    const MARGIN   = 0.5;
+    const usableW  = W - 2 * MARGIN;
+    const usableH  = H - 2 * MARGIN;
 
-    // ── Collect unique font names and embed them all upfront ─────────
-    // Running all fetches in parallel minimises wait time.
+    // ── Collect unique font names needed ─────────────────────────────
     const fontNamesNeeded = new Set();
     puzzlesData.forEach(pd => {
         if (pd.settings.fontTitle) fontNamesNeeded.add(pd.settings.fontTitle);
@@ -203,28 +207,29 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
         if (pd.settings.fontGrid)  fontNamesNeeded.add(pd.settings.fontGrid);
     });
 
-    const fontNameMap = {}; // Google name → resolved jsPDF name
-    // Phase 1: fetch all font binaries in parallel (cached after first download)
+    // ── Phase 1: fetch all TTF binaries in parallel ───────────────────
+    // fetchGoogleFontBase64 never throws — failures are silent & graceful.
     await Promise.all([...fontNamesNeeded].map(name => fetchGoogleFontBase64(name)));
-    // Phase 2: register each downloaded font into this specific jsPDF instance
+
+    // ── Phase 2: register each fetched font into this jsPDF instance ──
+    const fontNameMap = {}; // display name → resolved jsPDF font name
     [...fontNamesNeeded].forEach(name => {
         fontNameMap[name] = registerFontInPdf(pdf, name);
     });
 
-    // Helper: resolve a settings font name to the embedded jsPDF name
+    // Resolve a settings font name to the embedded jsPDF name (or fallback)
     function resolveFont(name) {
-        return fontNameMap[name] || 'Helvetica';
+        return fontNameMap[name] || 'helvetica';
     }
 
-    // ── Helper: draw a single full puzzle page (puzzle or solution) ──
+    // ── Helper: draw a single full puzzle page (puzzle or solution) ───
     function drawPuzzlePage(puzzleData, puzzleNum, isSolution) {
-        const s = puzzleData.settings;
+        const s      = puzzleData.settings;
         const result = puzzleData.result;
-        const grid = result.grid;
-        const rows = s.rows;
-        const cols = s.cols;
+        const grid   = result.grid;
+        const rows   = s.rows;
+        const cols   = s.cols;
 
-        // Per-section fonts (resolved to embedded names or Helvetica fallback)
         const titleFont = resolveFont(s.fontTitle);
         const cluesFont = resolveFont(s.fontClues);
         const gridFont  = resolveFont(s.fontGrid);
@@ -235,7 +240,7 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
             fr: { puzzle: 'Casse-t\u00eate', solution: 'Solution' },
             de: { puzzle: 'R\u00e4tsel',     solution: 'L\u00f6sung' }
         };
-        const lang = s.language || 'en';
+        const lang   = s.language || 'en';
         const labels = LANG_LABELS_PDF[lang] || LANG_LABELS_PDF.en;
 
         // ── Title ────────────────────────────────────────────────────
@@ -249,9 +254,9 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
         }
 
         let titleX, titleAlign;
-        if (s.titlePlacement === 'left')      { titleX = MARGIN;     titleAlign = 'left';   }
-        else if (s.titlePlacement === 'right') { titleX = W - MARGIN; titleAlign = 'right';  }
-        else                                   { titleX = W / 2;      titleAlign = 'center'; }
+        if (s.titlePlacement === 'left')       { titleX = MARGIN;     titleAlign = 'left';   }
+        else if (s.titlePlacement === 'right')  { titleX = W - MARGIN; titleAlign = 'right';  }
+        else                                    { titleX = W / 2;      titleAlign = 'center'; }
 
         if (titleText !== null) {
             safeSetFont(pdf, titleFont, 'bold');
@@ -261,10 +266,10 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
         }
 
         // ── Grid geometry ────────────────────────────────────────────
-        const titleBottomY  = MARGIN + 0.5;
+        const titleBottomY   = MARGIN + 0.5;
         const clueAreaHeight = 2.5;
-        const maxGridH = usableH - 0.5 - clueAreaHeight;
-        const maxGridW = usableW;
+        const maxGridH       = usableH - 0.5 - clueAreaHeight;
+        const maxGridW       = usableW;
 
         const cellSize = Math.min(maxGridW / cols, maxGridH / rows);
         const gridW    = cellSize * cols;
@@ -311,10 +316,10 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
                 const x2 = gridX + endC   * cellSize + cellSize / 2;
                 const y2 = gridY + endR   * cellSize + cellSize / 2;
 
-                const mx = (x1 + x2) / 2;
-                const my = (y1 + y2) / 2;
-                const dx = x2 - x1;
-                const dy = y2 - y1;
+                const mx      = (x1 + x2) / 2;
+                const my      = (y1 + y2) / 2;
+                const dx      = x2 - x1;
+                const dy      = y2 - y1;
                 const wordLen = Math.sqrt(dx * dx + dy * dy) + cellSize * 0.9;
                 const angle   = Math.atan2(dy, dx);
 
@@ -323,7 +328,7 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
         }
 
         // ── Clues ────────────────────────────────────────────────────
-        const clueStartY  = gridY + gridH + 0.35;
+        const clueStartY   = gridY + gridH + 0.35;
         const clueFontSize = 11;
         safeSetFont(pdf, cluesFont, 'normal');
         pdf.setFontSize(clueFontSize);
