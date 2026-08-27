@@ -17,70 +17,76 @@ function umlautSafe(str) {
     return String(str);
 }
 
-// ── Per-session font embedding cache ─────────────────────────────────────────
-// Stores the resolved jsPDF font name (or 'Helvetica' on failure) keyed by
-// the Google Font name. Prevents re-fetching on repeated exports.
-const _fontCache = {};
+// ── Per-session font data cache ───────────────────────────────────────────────
+// Stores { base64, vfsName } for each successfully fetched Google Font so the
+// binary is only downloaded once per browser session. Each new jsPDF instance
+// still needs addFileToVFS/addFont called on it, which registerFontInPdf does.
+const _fontDataCache = {}; // fontName → { base64, vfsName } | 'failed'
 
 /**
- * Fetch a Google Font as a TTF binary, embed it in the given jsPDF instance,
- * and return the font name to use with pdf.setFont().
- *
- * Falls back to 'Helvetica' if the font cannot be fetched or embedded.
- *
- * How it works:
- *  1. Request the CSS from Google Fonts API v1 (always returns TTF URLs,
- *     unlike v2 which returns WOFF2 for modern browsers).
- *  2. Parse the CSS to find the first fonts.gstatic.com .ttf URL.
- *  3. Fetch the TTF binary, base64-encode it.
- *  4. Register with jsPDF: addFileToVFS → addFont (normal + bold).
+ * Phase 1 – Fetch the font binary from Google Fonts and store it in
+ * _fontDataCache. Safe to call multiple times; returns immediately on cache hit.
+ * Returns true on success, false on failure.
  */
-async function embedGoogleFont(pdf, fontName) {
-    if (!fontName || fontName === 'Helvetica') return 'Helvetica';
-
-    // Already resolved this session
-    if (_fontCache[fontName] !== undefined) return _fontCache[fontName];
+async function fetchGoogleFontBase64(fontName) {
+    if (!fontName) return false;
+    if (_fontDataCache[fontName] === 'failed') return false;
+    if (_fontDataCache[fontName]) return true; // already downloaded
 
     try {
-        // Google Fonts CSS v1 always returns TTF src URLs regardless of UA
+        // Google Fonts CSS API v1 always returns truetype (.ttf) URLs
         const cssUrl = `https://fonts.googleapis.com/css?family=${encodeURIComponent(fontName)}:400,700`;
         const cssResp = await fetch(cssUrl);
-        if (!cssResp.ok) throw new Error(`CSS fetch failed: HTTP ${cssResp.status}`);
+        if (!cssResp.ok) throw new Error(`CSS HTTP ${cssResp.status}`);
         const cssText = await cssResp.text();
 
-        // Extract first TTF URL from the CSS
+        // Parse the first .ttf URL from the CSS
         const ttfMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/i)
                       || cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/i);
         if (!ttfMatch) throw new Error(`No TTF URL found in CSS for "${fontName}"`);
-        const ttfUrl = ttfMatch[1];
 
-        // Fetch the TTF binary
-        const fontResp = await fetch(ttfUrl);
-        if (!fontResp.ok) throw new Error(`TTF fetch failed: HTTP ${fontResp.status}`);
+        const fontResp = await fetch(ttfMatch[1]);
+        if (!fontResp.ok) throw new Error(`TTF HTTP ${fontResp.status}`);
         const buffer = await fontResp.arrayBuffer();
 
-        // Base64-encode in chunks (avoids call-stack overflow on large fonts)
+        // Base64-encode in safe chunks to avoid call-stack overflow
         const uint8 = new Uint8Array(buffer);
         let binary = '';
         const CHUNK = 8192;
         for (let i = 0; i < uint8.length; i += CHUNK) {
             binary += String.fromCharCode(...uint8.subarray(i, i + CHUNK));
         }
-        const base64 = btoa(binary);
 
-        // Register with jsPDF
         const vfsName = `${fontName.replace(/ /g, '_')}-Regular.ttf`;
-        pdf.addFileToVFS(vfsName, base64);
-        pdf.addFont(vfsName, fontName, 'normal');
-        pdf.addFont(vfsName, fontName, 'bold'); // alias same file for bold weight
-
-        _fontCache[fontName] = fontName;
-        console.info(`[pdf-export] ✓ Embedded font: "${fontName}"`);
-        return fontName;
+        _fontDataCache[fontName] = { base64: btoa(binary), vfsName };
+        console.info(`[pdf-export] ✓ Downloaded font: "${fontName}"`);
+        return true;
 
     } catch (err) {
-        console.warn(`[pdf-export] Could not embed "${fontName}", falling back to Helvetica:`, err);
-        _fontCache[fontName] = 'Helvetica';
+        console.warn(`[pdf-export] Could not download "${fontName}":`, err.message);
+        _fontDataCache[fontName] = 'failed';
+        return false;
+    }
+}
+
+/**
+ * Phase 2 – Register a previously downloaded font into a specific jsPDF
+ * instance. Must be called for every new pdf object, even if the font was
+ * already fetched, because jsPDF's VFS is per-instance.
+ * Returns the font name to pass to pdf.setFont(), or 'Helvetica' on failure.
+ */
+function registerFontInPdf(pdf, fontName) {
+    if (!fontName) return 'Helvetica';
+    const entry = _fontDataCache[fontName];
+    if (!entry || entry === 'failed') return 'Helvetica';
+
+    try {
+        pdf.addFileToVFS(entry.vfsName, entry.base64);
+        pdf.addFont(entry.vfsName, fontName, 'normal');
+        pdf.addFont(entry.vfsName, fontName, 'bold'); // same file for bold
+        return fontName;
+    } catch (err) {
+        console.warn(`[pdf-export] Could not register "${fontName}" in pdf:`, err.message);
         return 'Helvetica';
     }
 }
@@ -131,11 +137,12 @@ async function generatePDF(puzzlesData, trimSizeStr, solutionsPerPage) {
     });
 
     const fontNameMap = {}; // Google name → resolved jsPDF name
-    await Promise.all(
-        [...fontNamesNeeded].map(async name => {
-            fontNameMap[name] = await embedGoogleFont(pdf, name);
-        })
-    );
+    // Phase 1: fetch all font binaries in parallel (cached after first download)
+    await Promise.all([...fontNamesNeeded].map(name => fetchGoogleFontBase64(name)));
+    // Phase 2: register each downloaded font into this specific jsPDF instance
+    [...fontNamesNeeded].forEach(name => {
+        fontNameMap[name] = registerFontInPdf(pdf, name);
+    });
 
     // Helper: resolve a settings font name to the embedded jsPDF name
     function resolveFont(name) {
