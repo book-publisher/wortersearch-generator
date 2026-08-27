@@ -39,6 +39,11 @@ function getSettings() {
         title: titleText,
         showTitle: showTitle,
         words: document.getElementById('word-list').value.split('\n').map(w => w.trim()).filter(w => w),
+        // normalizedWords used only for grid-length validation below
+        _normalizedWords: document.getElementById('word-list').value.split('\n')
+            .map(w => w.trim()).filter(w => w)
+            .map(w => w.replace(/ß/g, 'SS').replace(/[äÄ]/g, 'Ä').replace(/[öÖ]/g, 'Ö').replace(/[üÜ]/g, 'Ü')
+                        .toUpperCase().replace(/[^A-ZÄÖÜ]/g, '')),
         cols, rows,
         directions,
         allowBackwards: document.getElementById('allow-backwards').checked,
@@ -251,9 +256,9 @@ function generateBatch() {
     const errorMsg = document.getElementById('error-message');
     errorMsg.style.display = 'none';
     
-    // Check word lengths
+    // Check word lengths — use normalized lengths since ß expands to SS
     const maxDimension = Math.max(s.cols, s.rows);
-    const oversized = s.words.some(w => w.length > maxDimension);
+    const oversized = (s._normalizedWords || s.words).some(w => w.length > maxDimension);
     if (oversized) {
         errorMsg.textContent = "Warning: Some words are longer than the grid size and may not fit!";
         errorMsg.style.display = 'block';
