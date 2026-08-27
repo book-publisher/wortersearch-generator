@@ -1,8 +1,26 @@
 class WordSearchGenerator {
+
+    /**
+     * Normalize a word for use in the grid.
+     * - ß  → SS  (as requested: ß always becomes SS)
+     * - ä  → Ä,  ö → Ö,  ü → Ü  (Umlauts are uppercased and kept)
+     * - Everything else is uppercased, non-letter chars stripped.
+     */
+    static normalizeWord(w) {
+        return w
+            .replace(/ß/g, 'SS')          // ß → SS  (before toUpperCase so ß isn't lost)
+            .replace(/ä/gi, 'Ä')           // ä / Ä kept
+            .replace(/ö/gi, 'Ö')           // ö / Ö kept
+            .replace(/ü/gi, 'Ü')           // ü / Ü kept
+            .toUpperCase()
+            .replace(/[^A-ZÄÖÜ]/g, '');   // strip everything that isn't a letter we support
+    }
+
     constructor(config) {
         this.rows = config.rows || 15;
         this.cols = config.cols || 15;
-        this.words = (config.words || []).map(w => w.toUpperCase().replace(/[^A-Z]/g, ''));
+        // Normalize each word; remember the display form (normalized = grid form = clue form)
+        this.words = (config.words || []).map(w => WordSearchGenerator.normalizeWord(w));
         this.directions = config.directions || ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'];
         this.allowBackwards = config.allowBackwards !== false;
         
