@@ -17,6 +17,64 @@ function umlautSafe(str) {
     return String(str);
 }
 
+// ── Direct TTF source map – Google Fonts GitHub repo via jsDelivr CDN ─────────
+// jsPDF 2.5.1 requires real TTF binary data. woff2 (what the Google Fonts CSS
+// API returns in modern browsers) is Brotli-compressed and cannot be parsed by
+// jsPDF. These URLs point to the uncompressed TTF source files in the official
+// Google/fonts GitHub repository served via jsDelivr (full CORS support).
+// Each entry: [ primaryUrl, alternativeUrl ] — the alt covers cases where
+// Google Fonts moved a font from a static TTF to a variable font subfolder.
+const FONT_TTF_URLS = {
+    'Roboto':           ['https://cdn.jsdelivr.net/gh/google/fonts@main/apache/roboto/static/Roboto-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/apache/roboto/Roboto-Regular.ttf'],
+    'Open Sans':        ['https://cdn.jsdelivr.net/gh/google/fonts@main/apache/opensans/static/OpenSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/apache/opensans/OpenSans-Regular.ttf'],
+    'Lato':             ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lato/Lato-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lato/static/Lato-Regular.ttf'],
+    'Montserrat':       ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/montserrat/static/Montserrat-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/montserrat/Montserrat-Regular.ttf'],
+    'Oswald':           ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/oswald/static/Oswald-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/oswald/Oswald-Regular.ttf'],
+    'Source Sans Pro':  ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/sourcesanspro/SourceSansPro-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/sourcesans3/static/SourceSans3-Regular.ttf'],
+    'Slabo 27px':       ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/slabo27px/Slabo27px-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/slabo27px/static/Slabo27px-Regular.ttf'],
+    'Raleway':          ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/raleway/static/Raleway-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/raleway/Raleway-Regular.ttf'],
+    'PT Sans':          ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/ptsans/PTSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/ptsans/static/PTSans-Regular.ttf'],
+    'Merriweather':     ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/merriweather/Merriweather-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/merriweather/static/Merriweather-Regular.ttf'],
+    'Nunito':           ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nunito/static/Nunito-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nunito/Nunito-Regular.ttf'],
+    'Playfair Display': ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/playfairdisplay/static/PlayfairDisplay-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/playfairdisplay/PlayfairDisplay-Regular.ttf'],
+    'Rubik':            ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/rubik/static/Rubik-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/rubik/Rubik-Regular.ttf'],
+    'Lora':             ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lora/static/Lora-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lora/Lora-Regular.ttf'],
+    'Work Sans':        ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/worksans/static/WorkSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/worksans/WorkSans-Regular.ttf'],
+    'Fira Sans':        ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/firasans/FiraSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/firasans/static/FiraSans-Regular.ttf'],
+    'Quicksand':        ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/quicksand/static/Quicksand-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/quicksand/Quicksand-Regular.ttf'],
+    'Inter':            ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inter/static/Inter-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inter/Inter-Regular.ttf'],
+    'Outfit':           ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/outfit/static/Outfit-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/outfit/Outfit-Regular.ttf'],
+    'Cabin':            ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/cabin/static/Cabin-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/cabin/Cabin-Regular.ttf'],
+    'Inconsolata':      ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inconsolata/static/Inconsolata-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inconsolata/Inconsolata-Regular.ttf'],
+    'Josefin Sans':     ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/josefinsans/static/JosefinSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/josefinsans/JosefinSans-Regular.ttf'],
+    'DM Sans':          ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/dmsans/static/DMSans-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/dmsans/DMSans-Regular.ttf'],
+    'Anton':            ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/anton/Anton-Regular.ttf',
+                         'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/anton/static/Anton-Regular.ttf'],
+};
+
 // ── Per-session font data cache ───────────────────────────────────────────────
 // Stores { base64, vfsName } for each successfully fetched Google Font so the
 // binary is only downloaded once per browser session. Each new jsPDF instance
@@ -24,8 +82,16 @@ function umlautSafe(str) {
 const _fontDataCache = {}; // fontName → { base64, vfsName } | 'failed'
 
 /**
- * Phase 1 – Fetch the font binary from Google Fonts and store it in
- * _fontDataCache. Safe to call multiple times; returns immediately on cache hit.
+ * Phase 1 – Download a TTF font binary and store it in _fontDataCache.
+ * Safe to call multiple times; returns immediately on cache hit.
+ *
+ * Priority:
+ *  1. FONT_TTF_URLS map  → direct TTF from Google Fonts GitHub via jsDelivr.
+ *     jsPDF 2.5.1 requires TTF; woff2 is Brotli-compressed and cannot be
+ *     decoded by jsPDF, so we must use real TTF files.
+ *  2. Alternative URL    → covers fonts that moved to a variable-font subfolder.
+ *  3. Helvetica fallback (handled by registerFontInPdf caller).
+ *
  * Returns true on success, false on failure.
  */
 async function fetchGoogleFontBase64(fontName) {
@@ -33,40 +99,41 @@ async function fetchGoogleFontBase64(fontName) {
     if (_fontDataCache[fontName] === 'failed') return false;
     if (_fontDataCache[fontName]) return true; // already downloaded
 
-    try {
-        // Google Fonts CSS API v1 always returns truetype (.ttf) URLs
-        const cssUrl = `https://fonts.googleapis.com/css?family=${encodeURIComponent(fontName)}:400,700`;
-        const cssResp = await fetch(cssUrl);
-        if (!cssResp.ok) throw new Error(`CSS HTTP ${cssResp.status}`);
-        const cssText = await cssResp.text();
+    // Build ordered candidate list: known-good TTF URLs first
+    const knownUrls = FONT_TTF_URLS[fontName] || [];
+    const candidates = [...knownUrls];
 
-        // Parse the first .ttf URL from the CSS
-        const ttfMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/i)
-                      || cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/i);
-        if (!ttfMatch) throw new Error(`No TTF URL found in CSS for "${fontName}"`);
+    for (const url of candidates) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                console.warn(`[pdf-export] HTTP ${resp.status} for "${fontName}" at ${url}`);
+                continue;
+            }
+            const buffer = await resp.arrayBuffer();
+            if (!buffer || buffer.byteLength < 200) continue; // sanity: real TTF > 200 bytes
 
-        const fontResp = await fetch(ttfMatch[1]);
-        if (!fontResp.ok) throw new Error(`TTF HTTP ${fontResp.status}`);
-        const buffer = await fontResp.arrayBuffer();
+            // Base64-encode in safe chunks to avoid call-stack overflow
+            const uint8 = new Uint8Array(buffer);
+            let binary = '';
+            const CHUNK = 8192;
+            for (let i = 0; i < uint8.length; i += CHUNK) {
+                binary += String.fromCharCode(...uint8.subarray(i, i + CHUNK));
+            }
 
-        // Base64-encode in safe chunks to avoid call-stack overflow
-        const uint8 = new Uint8Array(buffer);
-        let binary = '';
-        const CHUNK = 8192;
-        for (let i = 0; i < uint8.length; i += CHUNK) {
-            binary += String.fromCharCode(...uint8.subarray(i, i + CHUNK));
+            const vfsName = `${fontName.replace(/ /g, '_')}-Regular.ttf`;
+            _fontDataCache[fontName] = { base64: btoa(binary), vfsName };
+            console.info(`[pdf-export] ✓ Font embedded: "${fontName}" (${(buffer.byteLength / 1024).toFixed(0)} KB)`);
+            return true;
+
+        } catch (err) {
+            console.warn(`[pdf-export] Fetch failed for "${fontName}" (${url}):`, err.message);
         }
-
-        const vfsName = `${fontName.replace(/ /g, '_')}-Regular.ttf`;
-        _fontDataCache[fontName] = { base64: btoa(binary), vfsName };
-        console.info(`[pdf-export] ✓ Downloaded font: "${fontName}"`);
-        return true;
-
-    } catch (err) {
-        console.warn(`[pdf-export] Could not download "${fontName}":`, err.message);
-        _fontDataCache[fontName] = 'failed';
-        return false;
     }
+
+    console.warn(`[pdf-export] Could not embed "${fontName}" – PDF will use Helvetica for this element`);
+    _fontDataCache[fontName] = 'failed';
+    return false;
 }
 
 /**
